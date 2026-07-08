@@ -5,6 +5,7 @@ import Groq from 'groq-sdk'
 import { createClient } from '@supabase/supabase-js'
 import axios from 'axios'
 import express from 'express'
+import NodeCache from 'node-cache' // <-- AJOUTE ÇA
 
 // SERVEUR WEB POUR GARDER RAILWAY EN VIE 24/24
 const app = express()
@@ -24,27 +25,33 @@ async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info')
     const sock = makeWASocket({
         auth: state,
-        // printQRInTerminal: true  <-- ON ENLEVE CETTE LIGNE
-        browser: ['SHIELDCHECK MALI', 'Chrome', '1.0.0']
+        browser: ['SHIELDCHECK MALI', 'Chrome', '1.0.0'],
+        msgRetryCounterCache: new NodeCache() // <-- AJOUTE ÇA
     })
 
     sock.ev.on('creds.update', saveCreds)
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update
+
+        // AFFICHAGE DU QR
         if (qr) {
-            console.log('\n=================================')
+            console.log('\n\n=================================')
             console.log('🛡️ SCANNE CE QR CODE POUR CONNECTER:')
             console.log('WhatsApp > Appareils connectés > Associer un appareil')
-            console.log('=================================\n')
+            console.log('=================================\n\n')
             qrcode.generate(qr, { small: true })
         }
+
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut
-            console.log('Connexion coupée, reconnexion...')
-            if (shouldReconnect) startBot()
+            console.log('Connexion coupée, reconnexion dans 3s...')
+            if (shouldReconnect) setTimeout(startBot, 3000)
         }
-        if (connection === 'open') console.log('🛡️ SHIELDCHECK MALI CONNECTÉ 24/24')
+
+        if (connection === 'open') {
+            console.log('✅ SHIELDCHECK MALI CONNECTÉ 24/24')
+        }
     })
 
     sock.ev.on('messages.upsert', async ({ messages }) => {

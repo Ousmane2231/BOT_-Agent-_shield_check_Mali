@@ -24,7 +24,7 @@ async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info')
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
+        // printQRInTerminal: true  <-- ON ENLEVE CETTE LIGNE
         browser: ['SHIELDCHECK MALI', 'Chrome', '1.0.0']
     })
 
@@ -33,7 +33,10 @@ async function startBot() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update
         if (qr) {
-            console.log('SCANNE CE QR CODE POUR CONNECTER:')
+            console.log('\n=================================')
+            console.log('🛡️ SCANNE CE QR CODE POUR CONNECTER:')
+            console.log('WhatsApp > Appareils connectés > Associer un appareil')
+            console.log('=================================\n')
             qrcode.generate(qr, { small: true })
         }
         if (connection === 'close') {
@@ -88,7 +91,7 @@ async function startBot() {
 
         // RÈGLE 4: ACTU
         if (msgText.toLowerCase().includes('actu')) {
-            return await sock.sendMessage(from, { text: `📰 ACTUS MALI DU JOUR:\n\n1. Campagne ShieldCheck de sensibilisation à Bamako\n2. Nouvelle boutique partenaire certifiée à Kalabankoro\n3. 10 appareils bloqués ce mois grâce à ShieldCheck\n\nUrgence: ${URGENCE}`})
+            return await sock.sendMessage(from, { text: `📰 ACTUS MALI DU JOUR:\n\n1. Campagne ShieldCheck de sensibilisation à Bamako\n2. Nouvelle boutique partenaire certifiée à Kalabankoro\n3. 10 appareils bloqués ce mois grâce à ShieldCheck\nUrgence: ${URGENCE}`})
         }
 
         // RÈGLE 5: GROQ POUR TOUT LE RESTE

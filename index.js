@@ -1,19 +1,28 @@
 require('dotenv').config();
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const { createClient } = require('@supabase/supabase-js');
+const Groq = require('groq-sdk');
 const qrcode = require('qrcode-terminal');
-const fs = require('fs');
+const axios = require('axios');
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const OWNER = process.env.OWNER_NUMBER || "22382496985";
-const DB_FILE = './db.json';
+const OWNER = process.env.OWNER_NUMBER;
 
-// BASE DE DONNÉES LOCALE SIMPLE
-let db = { voles: [], enregistres: [] };
-if(fs.existsSync(DB_FILE)) db = JSON.parse(fs.readFileSync(DB_FILE));
-const saveDB = () => fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+// CONNEXIONS
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-console.log('🛡️ SHIELDCHECK MALI DEMARRE...');
+// INFOS PROJET
+const INFO = {
+    urgence: '66 51 84 01',
+    autres: '93 72 84 21 / 76 11 92 77 / 76 98 63 64',
+    chaine: 'https://whatsapp.com/channel/0029VbD1Jvt9mrGexwrvub3j',
+    fondateur: 'Sangaré Ousmane',
+    siege: 'Kalabankoro Tiebani, Bamako'
+}
+
+console.log('🛡️ SHIELDCHECK MALI V3.0 DEMARRE...');
 
 const startBot = async () => {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
@@ -22,8 +31,9 @@ const startBot = async () => {
     const sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: true, // AFFICHE LE QR
-        browser: ['ShieldCheck Mali', 'Chrome', '1.0.0']
+        printQRInTerminal: true, // AFFICHE QR
+        browser: ['ShieldCheck Mali', 'Chrome', '3.0.0'],
+        connectTimeoutMs: 60000
     });
     sock.ev.on('creds.update', saveCreds);
 
@@ -31,36 +41,37 @@ const startBot = async () => {
         const { connection, qr, lastDisconnect } = update;
 
         if(qr){
-            console.log('\n====================================');
-            console.log('SCAN CE QR CODE AVEC WHATSAPP');
-            console.log('WhatsApp > 3 points > Appareils connectés > Associer un appareil');
-            console.log('====================================\n');
+            console.log('\n========== SCANNE CE QR CODE ==========');
             qrcode.generate(qr, {small: true});
+            console.log('WhatsApp > 3 points > Appareils connectés > Associer un appareil');
+            console.log('=======================================\n');
         }
 
         if(connection === 'open') {
-            console.log('✅ BOT CONNECTÉ 24/24');
+            console.log('✅ BOT SHIELDCHECK CONNECTÉ 24/24');
             await sock.sendMessage(OWNER + '@s.whatsapp.net', { text: '🛡️ SHIELDCHECK MALI EN LIGNE' });
         }
 
         if(connection === 'close'){
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut;
+            console.log('Reconnexion dans 5s...', lastDisconnect.error);
             if(shouldReconnect) setTimeout(startBot, 5000);
         }
     });
 
-    // TOUTES LES RÈGLES DU BOT
+    // LOGIQUE PRINCIPALE
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
         if(!msg.message || msg.key.fromMe) return;
         const from = msg.key.remoteJid;
         const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || '').trim();
+        const lowerText = text.toLowerCase();
 
         // RÈGLE 0: ACCUEIL
-        if(text.toLowerCase() === 'salut' || text.toLowerCase() === 'menu'){
+        if(lowerText === 'salut' || lowerText === 'menu' || lowerText === '1'){
             const accueil = `Bienvenue chez *SHIELDCHECK MALI* 🛡️\nJe suis votre assistant anti-vol 24/24.\n\n`+
-            `Tapez:\n*1.* IMEI ou Châssis pour vérifier\n*2.* INSCRIRE pour les boutiques\n*3.* VOLÉ en cas de vol\n`+
-            `Urgence: 66 51 84 01`;
+            `Tapez:\n*1.* IMEI ou Châssis pour vérifier\n*2.* INSCRIRE pour les boutiques\n*3.* VOLÉ en cas de vol\n*4.* ACTU\n`+
+            `Urgence: ${INFO.urgence}`;
             return sock.sendMessage(from, { text: accueil });
         }
 
@@ -68,48 +79,102 @@ const startBot = async () => {
         if(/^[0-9]{15}$/.test(text) || /^[A-Z0-9]{17}$/i.test(text)){
             const identifiant = text.toUpperCase();
             const type_objet = /^[0-9]{15}$/.test(text)? 'Téléphone' : 'Moto';
+            await sock.sendMessage(from, { text: '🔍 Vérification en cours...' });
 
-            const vole = db.voles.find(v => v.identifiant === identifiant);
+            // Vérifier dans les 2 tables volés
+            let { data: vole1 } = await supabase.from('objets_voles').select('*').eq('identifiant', identifiant).single();
+            let { data: vole2 } = await supabase.from('objets_voles_reel').select('*').eq('identifiant', identifiant).single();
+            const vole = vole1 || vole2;
+
             if(vole){
-                return sock.sendMessage(from, { text: `🚨 *ALERTE: OBJET SIGNALÉ VOLÉ* 🚨\nObjet: ${vole.marque}\nCommissariat: ${vole.comm}\nNE L'ACHÈTE PAS.\nUrgence: 66 51 84 01` });
+                const reponse = `🚨 *ALERTE SHIELDCHECK: OBJET SIGNALÉ VOLÉ* 🚨\n`+
+                `Cet ${vole.marque_modele} est signalé VOLÉ au Commissariat ${vole.commissariat_source}.\n`+
+                `ATTENTION: Acheter un objet volé = Prison. NE L'ACHÈTE PAS.\n\n`+
+                `Urgence N°1: ${INFO.urgence}\nChaîne boutiques: ${INFO.chaine}`;
+                return sock.sendMessage(from, { text: reponse });
             }
 
-            const enregistre = db.enregistres.find(e => e.identifiant === identifiant);
+            // Vérifier si enregistré
+            let { data: enregistre } = await supabase.from('registre_ventes').select('*').eq('identifiant', identifiant).single();
             if(enregistre){
-                return sock.sendMessage(from, { text: `✅ *APPAREIL SÉCURISÉ* ✅\n${enregistre.type} enregistré au nom de ${enregistre.nom}\nTel: ${enregistre.tel}\nUrgence: 66 51 84 01` });
+                const reponse = `✅ *APPAREIL SÉCURISÉ* ✅\n`+
+                `Cet ${enregistre.type_objet} est enregistré chez ShieldCheck au nom de ${enregistre.nom_client}\n`+
+                `Tel: ${enregistre.telephone_client}. Appareil sécurisé.\n\n`+
+                `Urgence: ${INFO.urgence}`;
+                return sock.sendMessage(from, { text: reponse });
             }
 
-            return sock.sendMessage(from, { text: `✅ *IDENTIFIANT PROPRE* ✅\nAucun signalement.\n\n🛡️ Pour sécuriser: Rendez-vous en boutique partenaire.\nTARIFS: Téléphone 2000 CFA | Moto 5000 CFA\nChaîne: https://whatsapp.com/channel/0029VbD1Jvt9mrGexwrvub3j\nUrgence: 66 51 84 01` });
+            // Si PROPRE
+            const reponse = `✅ *IDENTIFIANT PROPRE* ✅\nAucun signalement.\n\n`+
+            `🛡️ SHIELDCHECK MALI sécurise ton bien.\nAVANTAGE: Si volé et enregistré, on peut le BLOQUER, VEROUILLER et LOCALISER.\n\n`+
+            `COMMENT S'INSCRIRE?\nRendez-vous dans une boutique partenaire certifiée.\n`+
+            `TARIFS: Téléphone 2000 CFA | Moto 5000 CFA\n`+
+            `Liste des boutiques: ${INFO.chaine}\nUrgence: ${INFO.urgence}`;
+            return sock.sendMessage(from, { text: reponse });
         }
 
-        // RÈGLE 2: INSCRIRE
-        if(text.toLowerCase().includes('inscrire') || text.toLowerCase().includes('boutique')){
-            return sock.sendMessage(from, { text: `Pour vous inscrire, rendez-vous dans une boutique partenaire certifiée ShieldCheck 🛡️\nTARIFS: Téléphone 2000 CFA | Moto 5000 CFA\nListe: https://whatsapp.com/channel/0029VbD1Jvt9mrGexwrvub3j\nEn cas de vol: Appelez 66 51 84 01` });
+        // RÈGLE 2: INSCRIRE / BOUTIQUE
+        if(lowerText.includes('inscrire') || lowerText.includes('boutique') || lowerText === '2'){
+            const reponse = `Pour vous inscrire, rendez-vous dans une boutique partenaire certifiée ShieldCheck 🛡️\n`+
+            `TARIFS: Téléphone 2000 CFA | Moto 5000 CFA\n`+
+            `Vous recevrez un Code de Certification.\n`+
+            `Retrouvez la liste sur notre chaîne:\n${INFO.chaine}\n`+
+            `En cas de vol: Appelez ${INFO.urgence}`;
+            return sock.sendMessage(from, { text: reponse });
         }
 
         // RÈGLE 3: VOLÉ
-        if(text.toLowerCase().includes('volé')){
-            return sock.sendMessage(from, { text: `Oh non frère 😔\n1. Déclarez d'abord au commissariat.\n2. Appelez IMMÉDIATEMENT 66 51 84 01.\n3. Envoyez-moi l'IMEI/Châssis ici.\nNous allons BLOQUER l'appareil.` });
+        if(lowerText.includes('volé') || lowerText === '3'){
+            const reponse = `Oh non frère 😔\n`+
+            `1. Déclarez d'abord au commissariat ou police.\n`+
+            `2. Appelez IMMÉDIATEMENT ${INFO.urgence}.\n`+
+            `3. Envoyez-moi l'IMEI/Châssis ici.\n`+
+            `Nous allons BLOQUER et LOCALISER l'appareil.`;
+            return sock.sendMessage(from, { text: reponse });
         }
 
-        // RÈGLE 4: COMMANDES ADMIN POUR TESTER
-        if(from.includes(OWNER)){
-            if(text.startsWith('addvolé ')){
-                const [cmd, identifiant, marque, comm] = text.split(' ');
-                db.voles.push({identifiant, marque, comm});
-                saveDB();
-                return sock.sendMessage(from, { text: `🚨 IMEI ${identifiant} ajouté à la liste des volés` });
-            }
-            if(text.startsWith('addenreg ')){
-                const [cmd, identifiant, type, nom, tel] = text.split(' ');
-                db.enregistres.push({identifiant, type, nom, tel});
-                saveDB();
-                return sock.sendMessage(from, { text: `✅ ${type} ${identifiant} enregistré au nom de ${nom}` });
+        // RÈGLE 4: ACTU
+        if(lowerText.includes('actu') || lowerText === '4'){
+            try {
+                const completion = await groq.chat.completions.create({
+                    messages: [{ role: "user", content: "Donne 3 actualités du Mali d'aujourd'hui. Très court, 1 ligne par actu." }],
+                    model: "llama-3.1-8b-instant",
+                });
+                const actu = completion.choices[0]?.message?.content || "Pas d'actu disponible.";
+                return sock.sendMessage(from, { text: `📰 *ACTU MALI*\n\n${actu}` });
+            } catch(e) {
+                return sock.sendMessage(from, { text: "Erreur pour charger les actus." });
             }
         }
 
-        // RÈGLE 5: PAR DÉFAUT
-        return sock.sendMessage(from, { text: `Je n'ai pas compris mon frère.\nTapez: IMEI, INSCRIRE, VOLÉ, MENU\nUrgence: 66 51 84 01` });
+        // RÈGLE 5: TOUTE AUTRE QUESTION = GROQ
+        try {
+            const systemPrompt = `Tu es ShieldCheck Mali, l'agent IA officiel. Tu parles comme un frère/une sœur malienne, sympa et pro.
+            TA MISSION:
+            Répondre à ABSOLUMENT TOUTE question.
+            Expliquer les RISQUES: 'Beaucoup vont en prison pour recel. Vérifie d'abord.'
+            Expliquer AVANTAGES: 'Enregistré = On peut BLOQUER, VEROUILLER, LOCALISER si volé.'
+            Expliquer INSCRIPTION: 'Uniquement en boutique partenaire. Va sur la chaîne pour la liste.'
+            Expliquer PROCÉDURE VOL: '1. Commissariat 2. Appeler ${INFO.urgence}'
+            Toujours donner le ${INFO.urgence} en premier et inviter sur la chaîne. Réponses courtes, max 3 lignes, 1 emoji.`;
+
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: text }
+                ],
+                model: "llama-3.1-8b-instant",
+                max_tokens: 200
+            });
+            const reponseIA = completion.choices[0]?.message?.content;
+            return sock.sendMessage(from, { text: reponseIA });
+        } catch(e) {
+            // RÈGLE 6: SI LE BOT NE COMPREND PAS
+            const erreur = `Je n'ai pas compris mon frère.\n`+
+            `Tapez: IMEI, INSCRIRE, VOLÉ, ACTU ou BOUTIQUE\n`+
+            `Urgence: ${INFO.urgence}`;
+            return sock.sendMessage(from, { text: erreur });
+        }
     });
 }
 

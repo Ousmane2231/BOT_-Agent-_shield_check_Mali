@@ -1,17 +1,19 @@
 {
   "name": "shieldcheck-mali-bot",
-  "version": "3.0.0",
-  "description": "SHIELDCHECK MALI : Sécurité Totale & Anti-Cybercriminalité",
+  "version": "3.2.0",
+  "description": "Bot WhatsApp ShieldCheck Mali Anti-vol",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.16",
-    "@supabase/supabase-js": "^2.45.4",
-    "groq-sdk": "^0.9.0",
-    "qrcode-terminal": "^0.12.0",
-    "axios": "^1.7.2",
+    "@whiskeysockets/baileys": "^6.7.17",
+    "@supabase/supabase-js": "^2.45.6",
+    "groq-sdk": "^0.16.0",
+    "qrcode": "^1.5.3",
     "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }

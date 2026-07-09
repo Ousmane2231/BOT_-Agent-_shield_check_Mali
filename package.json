@@ -1,16 +1,14 @@
 {
   "name": "shieldcheck-mali-bot",
-  "version": "3.0.0",
-  "description": "SHIELDCHECK MALI - Sécurité Totale & Anti-Cybercriminalité",
+  "version": "1.0.0",
+  "description": "SHIELDCHECK MALI - Test QR",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.16",
-    "@supabase/supabase-js": "^2.45.4",
-    "axios": "^1.7.2",
-    "dotenv": "^16.4.5",
-    "groq-sdk": "^0.7.0"
+    "qrcode-terminal": "^0.12.0",
+    "dotenv": "^16.4.5"
   }
 }

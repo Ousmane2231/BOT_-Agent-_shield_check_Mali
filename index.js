@@ -2,11 +2,11 @@ require('dotenv').config();
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { createClient } = require('@supabase/supabase-js');
 const Groq = require('groq-sdk');
-const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode'); // POUR ENVOYER LE QR EN IMAGE
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const OWNER = process.env.OWNER_NUMBER; // 22382496985
+const OWNER = process.env.OWNER_NUMBER; // Mets: 22382496985
 
 // CONNEXIONS
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -21,9 +21,9 @@ const INFO = {
     siege: 'Kalabankoro Tiebani, Bamako'
 }
 
-console.log('🛡️ SHIELDCHECK MALI V3.1 DEMARRE...');
+console.log('🛡️ SHIELDCHECK MALI V3.2 DEMARRE...');
 
-let sock; // global pour reconnexion
+let sock;
 
 const startBot = async () => {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
@@ -32,8 +32,8 @@ const startBot = async () => {
     sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: false, // on gère nous même
-        browser: ['ShieldCheck Mali', 'Chrome', '3.0.0'],
+        printQRInTerminal: false,
+        browser: ['ShieldCheck Mali', 'Chrome', '3.2.0'],
         connectTimeoutMs: 60000
     });
 
@@ -42,20 +42,25 @@ const startBot = async () => {
     sock.ev.on('connection.update', async (update) => {
         const { connection, qr, lastDisconnect } = update;
 
-        // 1. AFFICHER QR EN BOUCLE JUSQU'AU SCAN
-        if(qr){
-            console.log('\n========== SCANNE CE QR CODE AVANT 20s ==========');
-            qrcode.generate(qr, {small: true});
-            console.log('WhatsApp > 3 points > Appareils connectés > Associer un appareil');
-            console.log('================================================\n');
+        // ENVOYER LE QR EN IMAGE SUR LE NUMÉRO DU BOSS
+        if(qr && OWNER){
+            try {
+                const qrImage = await QRCode.toBuffer(qr);
+                console.log('Envoi du QR sur WhatsApp du boss...');
+                await sock.sendMessage(OWNER + '@s.whatsapp.net', {
+                    image: qrImage,
+                    caption: '🛡️ *SHIELDCHECK MALI*\n\nSCANNE CE QR CODE AVEC TON 2ÈME TÉLÉPHONE\n\n1. Ouvre WhatsApp\n2. 3 points > Appareils connectés > Associer un appareil\n\nValable 20 secondes'
+                });
+            } catch(e) {
+                console.log('Erreur envoi QR:', e)
+            }
         }
 
         if(connection === 'open') {
             console.log('✅ BOT SHIELDCHECK CONNECTÉ 24/24');
-            await sock.sendMessage(OWNER + '@s.whatsapp.net', { text: '🛡️ SHIELDCHECK MALI EN LIGNE' });
+            await sock.sendMessage(OWNER + '@s.whatsapp.net', { text: '✅ SHIELDCHECK MALI EN LIGNE\nLe bot est prêt à recevoir des messages.' });
         }
 
-        // 2. RECONNEXION AUTO SI ÇA COUPE
         if(connection === 'close'){
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut;
             console.log('Connexion fermée. Reconnexion dans 5s...', lastDisconnect.error?.message);
@@ -63,7 +68,7 @@ const startBot = async () => {
         }
     });
 
-    // LOGIQUE PRINCIPALE - TON CODE
+    // LOGIQUE PRINCIPALE SHIELDCHECK
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
         if(!msg.message || msg.key.fromMe) return;
@@ -82,7 +87,6 @@ const startBot = async () => {
         // RÈGLE 1: VÉRIFICATION IMEI / CHASSIS
         if(/^[0-9]{15}$/.test(text) || /^[A-Z0-9]{17}$/i.test(text)){
             const identifiant = text.toUpperCase();
-            const type_objet = /^[0-9]{15}$/.test(text)? 'Téléphone' : 'Moto';
             await sock.sendMessage(from, { text: '🔍 Vérification en cours...' });
 
             let { data: vole1 } = await supabase.from('objets_voles').select('*').eq('identifiant', identifiant).single();
@@ -151,7 +155,10 @@ const startBot = async () => {
         // RÈGLE 5: IA GROQ
         try {
             const systemPrompt = `Tu es ShieldCheck Mali, l'agent IA officiel. Tu parles comme un frère/une sœur malienne, sympa et pro.
-            TA MISSION: Répondre à ABSOLUMENT TOUTE question. Expliquer RISQUES, AVANTAGES, INSCRIPTION, PROCÉDURE VOL.
+            TA MISSION: Répondre à ABSOLUMENT TOUTE question. Expliquer RISQUES: 'Beaucoup vont en prison pour recel. Vérifie d'abord.'
+            Expliquer AVANTAGES: 'Enregistré = On peut BLOQUER, VEROUILLER, LOCALISER si volé.'
+            Expliquer INSCRIPTION: 'Uniquement en boutique partenaire. Va sur la chaîne pour la liste.'
+            Expliquer PROCÉDURE VOL: '1. Commissariat 2. Appeler ${INFO.urgence}'
             Toujours donner le ${INFO.urgence} en premier et inviter sur la chaîne. Réponses courtes, max 3 lignes, 1 emoji.`;
 
             const completion = await groq.chat.completions.create({
@@ -173,8 +180,6 @@ const startBot = async () => {
 
 startBot();
 
-// 3. SERVEUR POUR RAILWAY + PING TOUTES LES 5MIN POUR PAS QU'IL DORME
+// SERVEUR POUR RAILWAY + PING TOUTES LES 5MIN
 http.createServer((req,res)=>res.end('SHIELDCHECK OK')).listen(PORT, ()=>console.log('Serveur OK sur port '+PORT));
-setInterval(() => {
-    http.get(`http://localhost:${PORT}`)
-}, 300000); // Ping toutes les 5 minutes
+setInterval(() => { http.get(`http://localhost:${PORT}`) }, 300000);

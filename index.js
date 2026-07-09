@@ -3,11 +3,10 @@ const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLat
 const { createClient } = require('@supabase/supabase-js');
 const Groq = require('groq-sdk');
 const qrcode = require('qrcode-terminal');
-const axios = require('axios');
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const OWNER = process.env.OWNER_NUMBER;
+const OWNER = process.env.OWNER_NUMBER; // 22382496985
 
 // CONNEXIONS
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -22,29 +21,33 @@ const INFO = {
     siege: 'Kalabankoro Tiebani, Bamako'
 }
 
-console.log('🛡️ SHIELDCHECK MALI V3.0 DEMARRE...');
+console.log('🛡️ SHIELDCHECK MALI V3.1 DEMARRE...');
+
+let sock; // global pour reconnexion
 
 const startBot = async () => {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({
+    sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: true, // AFFICHE QR
+        printQRInTerminal: false, // on gère nous même
         browser: ['ShieldCheck Mali', 'Chrome', '3.0.0'],
         connectTimeoutMs: 60000
     });
+
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, qr, lastDisconnect } = update;
 
+        // 1. AFFICHER QR EN BOUCLE JUSQU'AU SCAN
         if(qr){
-            console.log('\n========== SCANNE CE QR CODE ==========');
+            console.log('\n========== SCANNE CE QR CODE AVANT 20s ==========');
             qrcode.generate(qr, {small: true});
             console.log('WhatsApp > 3 points > Appareils connectés > Associer un appareil');
-            console.log('=======================================\n');
+            console.log('================================================\n');
         }
 
         if(connection === 'open') {
@@ -52,14 +55,15 @@ const startBot = async () => {
             await sock.sendMessage(OWNER + '@s.whatsapp.net', { text: '🛡️ SHIELDCHECK MALI EN LIGNE' });
         }
 
+        // 2. RECONNEXION AUTO SI ÇA COUPE
         if(connection === 'close'){
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode!== DisconnectReason.loggedOut;
-            console.log('Reconnexion dans 5s...', lastDisconnect.error);
+            console.log('Connexion fermée. Reconnexion dans 5s...', lastDisconnect.error?.message);
             if(shouldReconnect) setTimeout(startBot, 5000);
         }
     });
 
-    // LOGIQUE PRINCIPALE
+    // LOGIQUE PRINCIPALE - TON CODE
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
         if(!msg.message || msg.key.fromMe) return;
@@ -81,7 +85,6 @@ const startBot = async () => {
             const type_objet = /^[0-9]{15}$/.test(text)? 'Téléphone' : 'Moto';
             await sock.sendMessage(from, { text: '🔍 Vérification en cours...' });
 
-            // Vérifier dans les 2 tables volés
             let { data: vole1 } = await supabase.from('objets_voles').select('*').eq('identifiant', identifiant).single();
             let { data: vole2 } = await supabase.from('objets_voles_reel').select('*').eq('identifiant', identifiant).single();
             const vole = vole1 || vole2;
@@ -94,7 +97,6 @@ const startBot = async () => {
                 return sock.sendMessage(from, { text: reponse });
             }
 
-            // Vérifier si enregistré
             let { data: enregistre } = await supabase.from('registre_ventes').select('*').eq('identifiant', identifiant).single();
             if(enregistre){
                 const reponse = `✅ *APPAREIL SÉCURISÉ* ✅\n`+
@@ -104,7 +106,6 @@ const startBot = async () => {
                 return sock.sendMessage(from, { text: reponse });
             }
 
-            // Si PROPRE
             const reponse = `✅ *IDENTIFIANT PROPRE* ✅\nAucun signalement.\n\n`+
             `🛡️ SHIELDCHECK MALI sécurise ton bien.\nAVANTAGE: Si volé et enregistré, on peut le BLOQUER, VEROUILLER et LOCALISER.\n\n`+
             `COMMENT S'INSCRIRE?\nRendez-vous dans une boutique partenaire certifiée.\n`+
@@ -147,15 +148,10 @@ const startBot = async () => {
             }
         }
 
-        // RÈGLE 5: TOUTE AUTRE QUESTION = GROQ
+        // RÈGLE 5: IA GROQ
         try {
             const systemPrompt = `Tu es ShieldCheck Mali, l'agent IA officiel. Tu parles comme un frère/une sœur malienne, sympa et pro.
-            TA MISSION:
-            Répondre à ABSOLUMENT TOUTE question.
-            Expliquer les RISQUES: 'Beaucoup vont en prison pour recel. Vérifie d'abord.'
-            Expliquer AVANTAGES: 'Enregistré = On peut BLOQUER, VEROUILLER, LOCALISER si volé.'
-            Expliquer INSCRIPTION: 'Uniquement en boutique partenaire. Va sur la chaîne pour la liste.'
-            Expliquer PROCÉDURE VOL: '1. Commissariat 2. Appeler ${INFO.urgence}'
+            TA MISSION: Répondre à ABSOLUMENT TOUTE question. Expliquer RISQUES, AVANTAGES, INSCRIPTION, PROCÉDURE VOL.
             Toujours donner le ${INFO.urgence} en premier et inviter sur la chaîne. Réponses courtes, max 3 lignes, 1 emoji.`;
 
             const completion = await groq.chat.completions.create({
@@ -169,10 +165,7 @@ const startBot = async () => {
             const reponseIA = completion.choices[0]?.message?.content;
             return sock.sendMessage(from, { text: reponseIA });
         } catch(e) {
-            // RÈGLE 6: SI LE BOT NE COMPREND PAS
-            const erreur = `Je n'ai pas compris mon frère.\n`+
-            `Tapez: IMEI, INSCRIRE, VOLÉ, ACTU ou BOUTIQUE\n`+
-            `Urgence: ${INFO.urgence}`;
+            const erreur = `Je n'ai pas compris mon frère.\nTapez: IMEI, INSCRIRE, VOLÉ, ACTU ou BOUTIQUE\nUrgence: ${INFO.urgence}`;
             return sock.sendMessage(from, { text: erreur });
         }
     });
@@ -180,5 +173,8 @@ const startBot = async () => {
 
 startBot();
 
-// SERVEUR POUR RAILWAY
+// 3. SERVEUR POUR RAILWAY + PING TOUTES LES 5MIN POUR PAS QU'IL DORME
 http.createServer((req,res)=>res.end('SHIELDCHECK OK')).listen(PORT, ()=>console.log('Serveur OK sur port '+PORT));
+setInterval(() => {
+    http.get(`http://localhost:${PORT}`)
+}, 300000); // Ping toutes les 5 minutes

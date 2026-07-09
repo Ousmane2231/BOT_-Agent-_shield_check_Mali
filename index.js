@@ -2,11 +2,10 @@ require('dotenv').config();
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const { createClient } = require('@supabase/supabase-js');
 const Groq = require('groq-sdk');
-const QRCode = require('qrcode'); // POUR ENVOYER LE QR EN IMAGE
+const qrcode = require('qrcode-terminal');
 const http = require('http');
 
 const PORT = process.env.PORT || 8080;
-const OWNER = process.env.OWNER_NUMBER; // Mets: 22382496985
 
 // CONNEXIONS
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -21,7 +20,7 @@ const INFO = {
     siege: 'Kalabankoro Tiebani, Bamako'
 }
 
-console.log('🛡️ SHIELDCHECK MALI V3.2 DEMARRE...');
+console.log('🛡️ SHIELDCHECK MALI V3.3.1 DEMARRE...');
 
 let sock;
 
@@ -32,33 +31,27 @@ const startBot = async () => {
     sock = makeWASocket({
         version,
         auth: state,
-        printQRInTerminal: false,
-        browser: ['ShieldCheck Mali', 'Chrome', '3.2.0'],
+        printQRInTerminal: true,
+        browser: ['ShieldCheck Mali', 'Chrome', '3.3.1'],
         connectTimeoutMs: 60000
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
+    sock.ev.on('connection.update', (update) => {
         const { connection, qr, lastDisconnect } = update;
 
-        // ENVOYER LE QR EN IMAGE SUR LE NUMÉRO DU BOSS
-        if(qr && OWNER){
-            try {
-                const qrImage = await QRCode.toBuffer(qr);
-                console.log('Envoi du QR sur WhatsApp du boss...');
-                await sock.sendMessage(OWNER + '@s.whatsapp.net', {
-                    image: qrImage,
-                    caption: '🛡️ *SHIELDCHECK MALI*\n\nSCANNE CE QR CODE AVEC TON 2ÈME TÉLÉPHONE\n\n1. Ouvre WhatsApp\n2. 3 points > Appareils connectés > Associer un appareil\n\nValable 20 secondes'
-                });
-            } catch(e) {
-                console.log('Erreur envoi QR:', e)
-            }
+        if(qr){
+            console.log('\n\n========================================');
+            console.log('SCANNE CE QR CODE AVEC TON 2ÈME TÉLÉPHONE');
+            console.log('WhatsApp > 3 points > Appareils connectés');
+            console.log('========================================\n');
+            qrcode.generate(qr, {small: true});
+            console.log('\n========================================\n\n');
         }
 
         if(connection === 'open') {
             console.log('✅ BOT SHIELDCHECK CONNECTÉ 24/24');
-            await sock.sendMessage(OWNER + '@s.whatsapp.net', { text: '✅ SHIELDCHECK MALI EN LIGNE\nLe bot est prêt à recevoir des messages.' });
         }
 
         if(connection === 'close'){
@@ -152,7 +145,7 @@ const startBot = async () => {
             }
         }
 
-        // RÈGLE 5: IA GROQ
+        // RÈGLE 5: IA GROQ POUR TOUT LE RESTE
         try {
             const systemPrompt = `Tu es ShieldCheck Mali, l'agent IA officiel. Tu parles comme un frère/une sœur malienne, sympa et pro.
             TA MISSION: Répondre à ABSOLUMENT TOUTE question. Expliquer RISQUES: 'Beaucoup vont en prison pour recel. Vérifie d'abord.'
